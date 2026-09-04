@@ -87,7 +87,12 @@ class CheckpointManager:
         path = self._path(tag)
         if not os.path.exists(path):
             return None
-        state = torch.load(path, map_location=map_location)
+        # weights_only=False: checkpoints here always come from this same
+        # CheckpointManager (never an untrusted third-party file) and
+        # deliberately carry non-tensor state (RNG state, python ints)
+        # that torch's default weights_only=True (PyTorch >= 2.6) refuses
+        # to unpickle.
+        state = torch.load(path, map_location=map_location, weights_only=False)
         model.load_state_dict(state["model"])
         if optimizer is not None and state.get("optimizer") is not None:
             optimizer.load_state_dict(state["optimizer"])
@@ -99,6 +104,22 @@ class CheckpointManager:
         np.random.set_state(state["rng_numpy"])
         random.setstate(state["rng_python"])
         return state
+
+    def get_best_metric(self, default=0.0):
+        """Reads the metric stored by save_best() without touching model/
+        optimizer state -- use on resume to seed a run's `best_so_far` so a
+        later, worse epoch after a disconnect can't overwrite a genuinely
+        better 'best' checkpoint from before the restart.
+        """
+        path = self._path("best")
+        if not os.path.exists(path):
+            return default
+        try:
+            state = torch.load(path, map_location="cpu", weights_only=False)
+            return state.get("extra", {}).get("metric", default)
+        except Exception as e:
+            print(f"[checkpoint] failed to read best metric: {e}")
+            return default
 
     def resume_or_start(self, model, optimizer=None, scheduler=None, map_location=None):
         """Try 'latest', fall back to 'latest_prev' if the newest write is corrupt.

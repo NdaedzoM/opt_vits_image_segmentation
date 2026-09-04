@@ -1,0 +1,8 @@
+torch>=2.1
+torchvision
+einops
+timm
+scipy
+numpy
+nibabel
+scikit-image
